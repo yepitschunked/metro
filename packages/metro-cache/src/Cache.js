@@ -27,9 +27,10 @@ class Cache<T> {
 
   _hits: WeakMap<Buffer, CacheStore<T>>;
 
-  constructor(stores: $ReadOnlyArray<CacheStore<T>>) {
+  constructor(stores: $ReadOnlyArray<CacheStore<T>>, logAccesses: boolean = false) {
     this._hits = new WeakMap();
     this._stores = stores;
+    this._logAccesses = logAccesses;
   }
 
   async get(key: Buffer): Promise<?T> {
@@ -42,12 +43,14 @@ class Cache<T> {
       const name = storeName + '::' + key.toString('hex');
       let value = null;
 
-      const logStart = Logger.log(
-        Logger.createActionStartEntry({
-          action_name: 'Cache get',
-          log_entry_label: name,
-        }),
-      );
+      const logStart = this._logAccesses
+        ? Logger.log(
+            Logger.createActionStartEntry({
+              action_name: 'Cache get',
+              log_entry_label: name,
+            }),
+          )
+        : null;
 
       try {
         const valueOrPromise = store.get(key);
@@ -60,20 +63,16 @@ class Cache<T> {
         }
       } finally {
         const hitOrMiss = value != null ? 'hit' : 'miss';
-        Logger.log({
-          ...Logger.createActionEndEntry(logStart),
-          action_result: hitOrMiss,
-        });
+        if (this._logAccesses && logStart) {
+          Logger.log(Logger.createActionEndEntry(logStart));
 
-        // Deprecated - will be removed () - use 'Cache get' and action_result
-        // (above) instead.
-        // TODO: T196506422
-        Logger.log(
-          Logger.createEntry({
-            action_name: 'Cache ' + hitOrMiss,
-            log_entry_label: name,
-          }),
-        );
+          Logger.log(
+            Logger.createEntry({
+              action_name: 'Cache ' + (value == null ? 'miss' : 'hit'),
+              log_entry_label: name,
+            }),
+          );
+        }
 
         if (value != null) {
           this._hits.set(key, store);

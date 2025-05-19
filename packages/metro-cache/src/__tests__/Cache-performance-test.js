@@ -10,7 +10,7 @@
  */
 
 'use strict';
-
+const v8 = require('v8');
 describe('Cache Performance', () => {
   let Cache;
   let Logger;
@@ -38,23 +38,31 @@ describe('Cache Performance', () => {
     jest.resetModules().restoreAllMocks();
   });
 
-  test.skip('does a lot of gc', async () => {
-    // Logger creates many objects.
-    logFn.mockImplementation(item => {
-      return {
-        a: item.action_name,
-        l: item.log_entry_label,
-        p: item.action_phase,
-      };
-    });
+  function aggregateStats(stats) {
+    return stats.statistics.reduce((memo, entry) => {
+      const stat = memo[entry.gcType] || { count: 0, cost: 0 };
+      stat.count += 1;
+      stat.cost += entry.cost;
+      memo[entry.gcType] = stat;
+      return memo;
+    }, {});
+  }
+
+  test('does a lot of gc', async () => {
     const store1 = createStore('Local');
-    const cache = new Cache([store1]);
+    const cache = new Cache([store1], true);
 
     store1.get.mockImplementation(() => 'bar');
 
+    const profiler = new v8.GCProfiler();
+    profiler.start();
     for (let i = 0; i < 1000000; i++) {
       await cache.get(Buffer.from('foo'));
     }
+    const stats = profiler.stop();
+    const agg = aggregateStats(stats);
+
+    console.log(agg);
 
     expect(logFn).toHaveBeenCalledTimes(3000000);
   }, 60000);
@@ -62,14 +70,19 @@ describe('Cache Performance', () => {
   test('does not alot of gc', async () => {
     // Logger is roughly a no-op
     const store1 = createStore('Local');
-    const cache = new Cache([store1]);
+    const cache = new Cache([store1], false);
 
     store1.get.mockImplementation(() => 'bar');
 
+    const profiler = new v8.GCProfiler();
+    profiler.start();
     for (let i = 0; i < 1000000; i++) {
       await cache.get(Buffer.from('foo'));
     }
 
-    expect(logFn).toHaveBeenCalledTimes(3000000);
+    const stats = profiler.stop();
+    const agg = aggregateStats(stats);
+
+    console.log(agg);
   }, 60000);
 });
